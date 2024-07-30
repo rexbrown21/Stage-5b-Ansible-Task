@@ -1,0 +1,102 @@
+---
+- name: Setup and deploy boilerplate application
+  hosts: hng
+  become: yes
+  tasks:
+    - name: Update and upgrade apt packages
+      apt:
+        update_cache: yes
+        upgrade: dist
+
+    - name: Create hng user with sudo privileges
+      user:
+        name: hng
+        groups: sudo
+        append: yes
+
+    - name: Install dependencies
+      apt:
+        name:
+          - git
+          - postgresql
+          - python3-psycopg2
+          - libpq-dev
+          - nginx
+        state: present
+
+    - name: Clone repository into /opt directory
+      git:
+        repo: 'https://github.com/hngprojects/hng_boilerplate_csharp_web.git'
+        dest: /opt/stage_5b
+        version: DevOps
+        force: yes
+      become_user: hng
+
+    - name: Save PostgreSQL admin credentials
+      copy:
+        dest: /var/secrets/pg_pw.txt
+        content: "admin_user:admin_password"
+        owner: root
+        group: root
+        mode: '0600'
+
+    - name: Setup PostgreSQL database
+      shell: |
+        sudo -i -u postgres psql -c "CREATE USER admin_user WITH PASSWORD 'admin_password';"
+        sudo -i -u postgres psql -c "CREATE DATABASE mydatabase OWNER admin_user;"
+
+    - name: Install and configure messaging queue (RabbitMQ example)
+      apt:
+        name: rabbitmq-server
+        state: present
+
+    - name: Start application on port 3000
+      shell: |
+        cd /opt/stage_5b
+        npm install
+        npm run start &
+      become_user: hng
+
+    - name: Configure Nginx
+      template:
+        src: nginx.conf.j2
+        dest: /etc/nginx/sites-available/stage_5b
+      notify:
+        - restart nginx
+
+    - name: Enable Nginx site configuration
+      file:
+        src: /etc/nginx/sites-available/stage_5b
+        dest: /etc/nginx/sites-enabled/
+        state: link
+
+    - name: Setup logging
+      file:
+        path: /var/log/stage_5b
+        state: directory
+        owner: hng
+        group: hng
+        mode: '0755'
+
+    - name: Create error log file
+      file:
+        path: /var/log/stage_5b/error.log
+        state: touch
+        owner: hng
+        group: hng
+        mode: '0644'
+
+    - name: Create stdout log file
+      file:
+        path: /var/log/stage_5b/out.log
+        state: touch
+        owner: hng
+        group: hng
+        mode: '0644'
+
+  handlers:
+    - name: restart nginx
+      service:
+        name: nginx
+        state: restarted
+
